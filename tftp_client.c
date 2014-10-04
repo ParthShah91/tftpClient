@@ -33,14 +33,14 @@ struct data_hdr* data(int block, char* data)
 
 int tftp_send()
 {
-	/* open file which is requested to send */
-	/* if such file is not exist then send error packet with error number */
-	/* create write request and send it */
-	/* start timer and wait for ack until time out if error packet get then abort transfer */
-	/* if time occurs and ack is not there then retransmit write request */
-	/* get tid from ack if first run then store it otherwise compare */
-	/* read data from file and create data packet with block number. send data packet */
-	/* start timer and wait for ack until timeout. no ack then retransmit packet */
+	/* Open file which is requested to send */
+	/* If such file is not exist then send error packet with error number */
+	/* Create write request and send it */
+	/* Start timer and wait for ack until time out if error packet get then abort transfer */
+	/* If time occurs and ack is not there then retransmit write request */
+	/* Get tid from ack if first run then store it otherwise compare */
+	/* Read data from file and create data packet with block number. send data packet */
+	/* Start timer and wait for ack until timeout. no ack then retransmit packet */
 
 }
 
