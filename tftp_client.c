@@ -15,6 +15,17 @@
  *
  * =====================================================================================
  */
+#include <stdio.h>
+#include <getopt.h>
+#include <stdbool.h>
+#include <string.h>
+
+#define MAX_FILE_NAME_LEN	255
+#define IP_ADDRESS_LEN		4
+
+bool is_read_request = false, is_write_request = false;
+char read_file_name[MAX_FILE_NAME_LEN], write_file_name[MAX_FILE_NAME_LEN];
+unsigned char server_ip_address[IP_ADDRESS_LEN];
 
 struct rw_hdr* read_write(int opcode, char* filename, int mode)
 {
@@ -62,12 +73,12 @@ int tftp_rcv()
 void run_tftp(int s_fd)
 {
 	/* if require, as per the request fill respective structure */
-
+#if 0
 	if(/* receive */)
 		tftp_rcv(/* ptr of receive struct */);
 	else if(/* send */ )
 		tftp_send(/* ptr of send struct */ );
-
+#endif
 }
 
 int creat_socket(char* addr, int port)
@@ -86,38 +97,93 @@ int valid_ip_address(char* addr)
 
 void print_usage(void)
 {
-
+	printf("################### TFTP client ##############################################\n");
+	printf("Usage: ./tftpClient [OPTION]\n");
+	printf("  -i, --ip	IP ADDDRESS	TFTP server ip address\n");
+	printf("  -r, --read	FILE NAME	Name of file to be fetch from server\n");
+	printf("  -w, --write	FILE NAME	Name of file to be send to server\n\n");
+	printf("Examples:\n");
+	printf("1. ./tftpClient -i 192.168.2.62 -r readme.txt\n");
+	printf("\tReads 'readme.txt' from TFTP server running on 192.168.2.62\n");
+	printf("2. ./tftpClient --ip 192.168.2.240 --write make_in_india.txt\n");
+	printf("\tWrites file 'make_in_india.txt' to server running on 192.168.2.240\n");
+	printf("##############################################################################\n");
 }
 
+int validate_ip_address(char *ip_addr_str)
+{
+	char ip_address_delim[2] = ".";
+	char *token;
+	int ip_address_byte = 0;
+
+	token = strtok(ip_addr_str, ip_address_delim);
+	while(token)
+	{
+		if(atoi(token) > 255)
+		{
+			printf("ERROR: Invalid ip address string. Exiting...\n");
+			return -1;
+		}
+		server_ip_address[ip_address_byte++] = atoi(token);
+		//printf("ip byte: %d\n", server_ip_address[ip_address_byte - 1]);
+		token = strtok(NULL, ip_address_delim);
+	}
+	return 0;
+}
+
+int parse_args(int argc, char** argv)
+{
+	int c = 0, opt_index = 0;
+	struct option opts[] = {
+		{"ip", required_argument, 0, 'i'},
+		{"read", required_argument, 0, 'r'},
+		{"write", required_argument, 0, 'w'},
+	};
+	while(1)
+	{
+		c = getopt_long(argc, argv, "i:r:w:", opts, &opt_index);
+		if(c == -1)
+			break;
+		switch(c)
+		{
+			case 'i':
+				//printf("ip address string\n");
+				if(validate_ip_address(optarg) < 0)
+					return -1;
+				break;
+			case 'r':
+				//printf("read request\n");
+				is_read_request = true;
+				strcpy(read_file_name, optarg);
+				//printf("file name: %s\n", read_file_name);
+				break;
+			case 'w':
+				//printf("write request\n");
+				is_write_request = true;
+				strcpy(write_file_name, optarg);
+				//printf("file name: %s\n", write_file_name);
+				break;
+			case '?':
+				print_usage();
+				break;
+			default:
+				printf("ERROR: Invalid arguments. Exiting...\n");
+				break;
+		}
+	}
+	return 0;
+}
 
 int main(int argc, char** argv)
 {
 	/* argument check */
-	print_usage();
-
-
-	while(getopt()) {
-		/* Note :- sequence of switch may get changed */
-		switch() {
-
-			case /* read or write request */
-				/* if write request then on one flag */
-				break;
-			case /* get file  */
-				/* if request is to get file from server and local 
-				 * name is given then store it on different variable */
-				break;
-			case /* extract server ip address */
-				if(validate_ip_address() < 0)
-					/* error with suitable error message */
-
-		}
-	}
+	parse_args(argc, argv);
 
 	/* create socket and bind with server */
-	sockfd = creat_socket(char* addr,int port);
+	//sockfd = creat_socket(char* addr,int port);
 
-	run_tftp(socketfd);
+	//run_tftp(socketfd);
 
+	return 0;
 }
 
