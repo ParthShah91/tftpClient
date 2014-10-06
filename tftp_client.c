@@ -136,8 +136,8 @@ int parse_args(int argc, char** argv)
 	int c = 0, opt_index = 0;
 	struct option opts[] = {
 		{"ip", required_argument, 0, 'i'},
-		{"read", required_argument, 0, 'r'},
-		{"write", required_argument, 0, 'w'},
+		{"put", required_argument, 0, 'r'},
+		{"get", required_argument, 0, 'w'},
 	};
 	while(1)
 	{
@@ -170,19 +170,20 @@ int parse_args(int argc, char** argv)
 				printf("ERROR: Invalid arguments. Exiting...\n");
 				break;
 		}
-	}
-	return 0;
+		return 0;
 }
 
 int main(int argc, char** argv)
 {
+	struct sockaddr_in server;
+	int socketfd;
 	/* argument check */
 	parse_args(argc, argv);
 
 	/* create socket and bind with server */
-	//sockfd = creat_socket(char* addr,int port);
+	socketfd = createSocket (&server);;
 
-	//run_tftp(socketfd);
+	run_tftp(socketfd);
 
 	return 0;
 }
