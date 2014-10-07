@@ -19,10 +19,17 @@
 #include <getopt.h>
 #include <stdbool.h>
 #include <string.h>
+#include <sys/time.h>
+#include <sys/select.h>
+#include <sys/socket.h>
+#include <inttypes.h>
+#include <stdlib.h>
+
+#include "tftp.h"
 
 #define MAX_FILE_NAME_LEN	255
 #define IP_ADDRESS_LEN		4
-
+#define TIMEOUT			5   /* time out in seconds */
 bool is_read_request = false, is_write_request = false;
 char read_file_name[MAX_FILE_NAME_LEN], write_file_name[MAX_FILE_NAME_LEN];
 unsigned char server_ip_address[IP_ADDRESS_LEN];
@@ -42,17 +49,140 @@ struct data_hdr* data(int block, char* data)
 
 }
 
-int tftp_send()
+int ack_wait(int sfd, char* file)
 {
+	fd_set rfds;
+	int retval;
+	struct timeval timeout;
+	int i;
+	int ret;
+
+	FD_ZERO(&rfds);
+	FD_SET(sfd, &rfds);
+	timeout.tv_sec = TIMEOUT;
+	timeout.tv_usec = 0;
+
+	retval = select(1, &rfds, NULL, NULL, &timeout);
+	if (retval == -1)
+		return -1;
+	else if (retval) {
+		printf("Data is available now.\n");
+		ret = recvfrom(sfd, data_buf, sizeof(data_buf), 0, server,sizeof(struct sockaddr));
+		if(ret < 0) {
+			perror("Rcv error\n");
+			return -1;
+		}
+	}
+	else {
+		printf("No data within five seconds.\n");
+		return -2;
+	}
+
+	if(data_buf[0] == 0 && data_buf[1] == 5)
+	{
+		error_msg(data_buf[3]);
+		return -1;
+	}
+
+	return 0;
+
+	/* Todo */
+}
+
+int send_data(int socket_fd, char* buf, uint16_t block_num, int data_size)
+{
+	char *data_buf = NULL;
+	int status = 0;
+
+	data_buf = (char*)malloc(data_size + 4); //TODO remove hardcoding
+	if(!data_buf)
+	{
+		perror("send_data malloc");
+		return -1;
+	}
+
+	data_buf[0] = 0;
+	data_buf[1] = 3; // TODO remove hardcoding
+	memcpy(data_buf + 2, &block_num, sizeof(block_num));
+	memcpy(data_buf + 4, buf, data_size);
+
+	status = sendto(socket_fd, data_buf, data_size + 4, 0, &server, sizeof(struct sockaddr));
+	if(status < 0)
+	{
+		perror("sendto");
+		return -1;
+	}
+
+	return 0;
+}
+
+int tftp_send(char* file, int socketFd)
+{
+	char buf[512]; //TODO remove hardcoding
+	uint16_t block_num = 0;
+	int i = 0, ret = 0, num_bytes_read = 0;
+	bool file_read_complete = false;
+	FILE* fp;
+
 	/* Open file which is requested to send */
-	/* If such file is not exist then send error packet with error number */
+	fp = fopen(file,"r");
+	if(!fp) {
+		perror("Couldn't open file for reading\n");
+		return ERROR;
+	}
+
 	/* Create write request and send it */
 	/* Start timer and wait for ack until time out if error packet get then abort transfer */
 	/* If time occurs and ack is not there then retransmit write request */
 	/* Get tid from ack if first run then store it otherwise compare */
+	rw_req_packet(WRITE, file, NET_ASCII);
+	while(i++ < RTCOUNT)
+	{
+		ret = ack_wait(socketFd, file);
+		if (ret == -2)
+			rw_req_packet(WRITE, file, NET_ASCII);
+		else if(ret == -1)
+		{
+			fclose(fp);
+			return -1;
+		}
+		else
+			break;
+
+	}
+
 	/* Read data from file and create data packet with block number. send data packet */
 	/* Start timer and wait for ack until timeout. no ack then retransmit packet */
+	while(!file_read_complete)
+	{
+		num_bytes_read = fread(buf, 1, 512, fp);
+		if(!num_bytes_read)
+		{
+			if(ferror(fp))
+			{
+				perror("file read");
+				return -1;
+			}
+		}
+		send_data(socketFd, buf, block_num, num_bytes_read);
+		while(i++ < RTCOUNT)
+		{
+			ret = ack_wait(socketFd, file);
+			if (ret == -2)
+			{
+				send_data(socketFd, buf, block_num, num_bytes_read);
+			}
+			else if(ret == -1)
+			{
+				fclose(fp);
+				return -1;
+			}
+			else
+				break;
 
+		}
+
+	}
 }
 
 int tftp_rcv()
@@ -171,8 +301,8 @@ int parse_args(int argc, char** argv)
 				break;
 		}
 		return 0;
+	}
 }
-
 int main(int argc, char** argv)
 {
 	struct sockaddr_in server;

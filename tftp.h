@@ -11,15 +11,25 @@
 #include <sys/wait.h>
 #include <dirent.h>
 
-typedef enum PACKET_TYPE { 
+#define ERROR		-1
+#define READ		1
+#define WRITE		2
+#define RTCOUNT		5
+
+typedef enum _PACKET_TYPE_ { 
 	RD_REQ, 
 	WR_REQ,
 	DATA,
 	ACK,
 	ERR
-}
+} PACKET_TYPE;
 
-int rw_req_packet(uint16_t opcode, char *filename, char *mode);
+typedef enum _encoding_type_ {
+	NET_ASCII,
+	OCTET
+} encoding_type;
+
+int rw_req_packet(unsigned char req_type, char *filename, encoding_type type);
 int ack_packet(uint16_t opcode, uint16_t block);
 int data_packet(uint16_t opcode, uint16_t block, char *data);
 int error_packet(uint16_t opcode, uint16_t error_code, char *errmsg);
