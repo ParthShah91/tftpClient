@@ -37,10 +37,18 @@ unsigned char server_ip_address[IP_ADDRESS_LEN];
 
 char data_buf[MAX_DATA_SIZE];
 
-int rw_req_packet(unsigned char req_type, char *filename, encoding_type type)
+int rw_req_packet(unsigned char req_type, char *filename, char *type, char *buf)
 {
-
+	int len;
+	len = sprintf (buf, "%c%c%s%c%s%c", 0x00, req_type, filename, 0x00, type, 0x00);
+	if (len == 0)
+	{   
+		printf ("Error in creating the request packet\n");
+		return -1;
+	}   
+	return len;
 }
+
 struct rw_hdr* read_write(int opcode, char* filename, int mode)
 {
 
@@ -142,12 +150,13 @@ int tftp_send(char* file, int socketFd)
 	/* Start timer and wait for ack until time out if error packet get then abort transfer */
 	/* If time occurs and ack is not there then retransmit write request */
 	/* Get tid from ack if first run then store it otherwise compare */
-	rw_req_packet(WRITE, file, NET_ASCII);
+	//rw_req_packet(WRITE, file, NET_ASCII);
 	while(i++ < RTCOUNT)
 	{
 		ret = ack_wait(socketFd, file);
-		if (ret == -2)
-			rw_req_packet(WRITE, file, NET_ASCII);
+		if (ret == -2) {
+			//rw_req_packet(WRITE, file, NET_ASCII);
+		}
 		else if(ret == -1)
 		{
 			fclose(fp);
@@ -192,7 +201,7 @@ int tftp_send(char* file, int socketFd)
 	}
 }
 
-int tftp_rcv()
+int tftp_rcv(char* file, int socketFd)
 {
 	/* create file with given name */
 	/* send first request */
@@ -205,6 +214,200 @@ int tftp_rcv()
 	 * using block number create ack request
 	 * send that ack and write data into file
 	 * if data packet is less then 512 then it means it is last packet */
+
+	/* local variables */
+	int len, server_len, opcode, i, j, n, tid = 0, flag = 1;
+	unsigned short int count = 0, rcount = 0;
+	unsigned char filebuf[DATA_SIZE + 1];
+	unsigned char packetbuf[DATA_SIZE + 12];
+	extern int errno;
+	char filename[128], mode[12], *bufindex, ackbuf[512];
+	struct sockaddr_in data;
+	FILE *fp;			/* pointer to the file we will be getting */
+
+//	strcpy (filename, pFilename);	//copy the pointer to the filename into a real array
+//	strcpy (mode, pMode);		//same as above
+
+	strcpy (mode, "netascii");
+	fp = fopen (read_file_name, "w");	/* open the file for writing */
+	if (fp == NULL)
+	{				//if the pointer is null then the file can't be opened - Bad perms 
+		printf ("Client requested bad file: cannot open for writing (%s)\n",
+					filename);
+		return;
+	}
+	
+	printf ("Getting file... (destination: %s) \n", filename);
+	rw_req_packet(READ, read_file_name, "netascii", buf);
+	/* zero the buffer before we begin */
+	memset (filebuf, 0, sizeof (filebuf));
+	n = DATA_SIZE + 4;
+	do
+	{
+		/* zero buffers so if there are any errors only NULLs will be exposed */
+		memset (packetbuf, 0, sizeof (packetbuf));
+		memset (ackbuf, 0, sizeof (ackbuf));
+		if (n != (DATA_SIZE + 4))	/* remember if our DATA_SIZE is less than a full packet this was the last packet to be received */
+		{
+			printf("Last chunk detected (file chunk size: %d). exiting while loop\n",n - 4);
+			len = sprintf (ackbuf, "%c%c%c%c", 0x00, 0x04, 0x00, 0x00);
+			ackbuf[2] = (count & 0xFF00) >> 8;	//fill in the count (top number first)
+			ackbuf[3] = (count & 0x00FF);	//fill in the lower part of the count
+			printf ("Sending ack # %04d (length: %d)\n", count, len);
+			if (sendto(socketFd, ackbuf, len, 0, (struct sockaddr *) &server, sizeof (server)) != len)
+			{
+				printf ("Mismatch in number of sent bytes\n");
+				return;
+			}
+			printf ("The Client has sent an ACK for packet\n");
+			goto done;		/* gotos are not optimal, but a good solution when exiting a multi-layer loop */
+		}
+
+		count++;
+
+		for (j = 0; j < RETRIES; j++)	/* this allows us to loop until we either break out by getting the correct ack OR time out because we've looped more than RETRIES times */
+		{
+			server_len = sizeof (data);
+			errno = EAGAIN;	/* this allows us to enter the loop */
+			n = -1;
+			for (i = 0; errno == EAGAIN && i <= TIMEOUT && n < 0; i++)	/* this for loop will just keep checking the non-blocking socket until timeout */
+			{
+
+				n = recvfrom (socketFd, packetbuf, sizeof (packetbuf) - 1,
+							MSG_DONTWAIT, (struct sockaddr *) &data,
+							(socklen_t *) & server_len);
+				usleep (1000);
+			}
+			/*if(debug)
+			 * 	     ip_port (data);  print the vlaue recived from the server */
+			if (!tid)
+			{
+				tid = ntohs (data.sin_port);	//get the tid of the server.
+				server.sin_port = htons (tid);	//set the tid for rest of the transfer 
+			}
+
+			if (n < 0 && errno != EAGAIN)	/* this will be true when there is an error that isn't the WOULD BLOCK error */
+			{
+				printf("The server could not receive from the client (errno: %d n: %d)\n",errno, n);
+			}
+			else if (n < 0 && errno == EAGAIN)	/* this is true when the error IS would block. This means we timed out */
+			{
+				printf ("Timeout waiting for data (errno: %d == %d n: %d)\n",
+							errno, EAGAIN, n);
+			}
+			else
+			{
+				if (server.sin_addr.s_addr != data.sin_addr.s_addr)	/* checks to ensure get from ip is same from ACK IP */
+				{
+					printf("Error recieving file (data from invalid address)\n");
+					j--;
+					continue;	/* we aren't going to let another connection spoil our first connection */
+				}
+				if (tid != ntohs (server.sin_port))	/* checks to ensure get from the correct TID */
+				{
+					printf ("Error recieving file (data from invalid tid)\n");
+					len = sprintf ((char *) packetbuf, "%c%c%c%cBad/Unknown TID%c", 0x00, 0x05, 0x00, 0x05, 0x00);
+					if (sendto (socketFd, packetbuf, len, 0, (struct sockaddr *) &server, sizeof (server)) != len)
+					{
+						printf("Mismatch in number of sent bytes while trying to send mode error packet\n");
+					}
+					j--;
+					continue;	/* we aren't going to let another connection spoil our first connection */
+				}
+				/* this formatting code is just like the code in the main function */
+				bufindex = (char *) packetbuf;	/*start our pointer going*/
+				if (bufindex++[0] != 0x00)
+					printf ("bad first nullbyte!\n");
+				opcode = *bufindex++;
+				rcount = *bufindex++ << 8;
+				rcount &= 0xff00;
+				rcount += (*bufindex++ & 0x00ff);
+				memcpy ((char *) filebuf, bufindex, n - 4);	/* copy the rest of the packet (data portion) into our data array */
+				printf("Remote host sent data packet #%d (Opcode: %d packetsize: %d filechunksize: %d)\n",
+						 rcount, opcode, n, n - 4);
+#if 0
+				if (flag)
+				{
+					if (n > 516)
+						DATA_SIZE = n - 4;
+					else if (n < 516)
+						DATA_SIZE = 512;
+					flag = 0;
+				}
+#endif
+				if (opcode != 3)	/* ack packet should have code 3 (data) and should be ack+1 the packet we just sent */
+				{
+					printf("Badly ordered/invalid data packet (Got OP: %d Block: %d) (Wanted Op: 3 Block: %d)\n",
+							 opcode, rcount, count);
+					if (opcode > 5)
+					{
+						len = sprintf ((char *) packetbuf,
+								"%c%c%c%cIllegal operation%c",
+								0x00, 0x05, 0x00, 0x04, 0x00);
+						if (sendto (socketFd, packetbuf, len, 0, (struct sockaddr *) &server, sizeof (server)) != len)	/* send the data packet */
+						{
+							printf("Mismatch in number of sent bytes while trying to send mode error packet\n");
+						}
+					}
+				}
+				else
+				{
+					len = sprintf (ackbuf, "%c%c%c%c", 0x00, 0x04, 0x00, 0x00);
+					ackbuf[2] = (count & 0xFF00) >> 8;	//fill in the count (top number first)
+					ackbuf[3] = (count & 0x00FF);	//fill in the lower part of the count
+					printf ("Sending ack # %04d (length: %d)\n", count, len);
+					//if (((count - 1) % ackfreq) == 0)
+					if (count -1 == 0)
+					{
+						if (sendto(socketFd, ackbuf, len, 0, (struct sockaddr *) &server,
+								 sizeof (server)) != len)
+						{
+							printf ("Mismatch in number of sent bytes\n");
+							return;
+						}
+						printf ("The client has sent an ACK for packet %d\n",
+									count);
+					}		/*check for ackfreq*/
+					else if (count == 1)
+					{
+						if (sendto(socketFd, ackbuf, len, 0, (struct sockaddr *) &server,
+								 sizeof (server)) != len)
+						{
+							printf ("Mismatch in number of sent bytes\n");
+							return;
+						}
+						printf ("The Client has sent an ACK for packet 1\n");
+					}
+					break;
+				}		//end of else
+			}
+		}
+		if (j == RETRIES)
+		{
+			printf ("Data recieve Timeout. Aborting transfer\n");
+			fclose (fp);
+			return;
+		}
+	}
+	while (fwrite (filebuf, 1, n - 4, fp) == n - 4);	/* if it doesn't write the file the length of the packet received less 4 then it didn't work */
+	fclose (fp);
+	sync ();
+	printf("fclose and sync unsuccessful. File failed to recieve properly\n");
+	return;
+
+done:
+
+	fclose (fp);
+	sync ();
+	printf ("fclose and sync successful. File received successfully\n");
+	return;
+
+
+#if 0
+	tftp_read();
+#endif
+
+
 }
 
 void run_tftp(int s_fd)
