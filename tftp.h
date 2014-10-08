@@ -16,8 +16,10 @@
 #define WRITE		2
 #define RTCOUNT		5
 #define S_PORT		69
-#define IP_ADDRESS_LEN		8
+#define IP_ADDRESS_LEN	16	
 
+#define DATA_SIZE	512
+#define RETRIES		3
 
 struct sockaddr_in server;
 struct hostent *host_info;
@@ -31,14 +33,16 @@ typedef enum _PACKET_TYPE_ {
 	ERR
 } PACKET_TYPE;
 
+#if 0
 typedef enum _encoding_type_ {
 	NET_ASCII,
 	OCTET
 } encoding_type;
+#endif
 
-int rw_req_packet(unsigned char req_type, char *filename, encoding_type type);
+int rw_req_packet(int socketFd, unsigned char req_type, char *filename, char* type);
 int ack_packet(uint16_t opcode, uint16_t block);
 int data_packet(uint16_t opcode, uint16_t block, char *data);
 int error_packet(uint16_t opcode, uint16_t error_code, char *errmsg);
 
-
+char buf[BUFSIZ];
