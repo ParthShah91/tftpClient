@@ -27,6 +27,7 @@
 
 #include "tftp.h"
 
+#define MAX_DATA_SIZE		300
 #define MAX_FILE_NAME_LEN	255
 #define IP_ADDRESS_LEN		4
 #define TIMEOUT			5   /* time out in seconds */
@@ -34,6 +35,12 @@ bool is_read_request = false, is_write_request = false;
 char read_file_name[MAX_FILE_NAME_LEN], write_file_name[MAX_FILE_NAME_LEN];
 unsigned char server_ip_address[IP_ADDRESS_LEN];
 
+char data_buf[MAX_DATA_SIZE];
+
+int rw_req_packet(unsigned char req_type, char *filename, encoding_type type)
+{
+
+}
 struct rw_hdr* read_write(int opcode, char* filename, int mode)
 {
 
@@ -67,7 +74,7 @@ int ack_wait(int sfd, char* file)
 		return -1;
 	else if (retval) {
 		printf("Data is available now.\n");
-		ret = recvfrom(sfd, data_buf, sizeof(data_buf), 0, server,sizeof(struct sockaddr));
+		ret = recvfrom(sfd, data_buf, sizeof(data_buf), 0, (struct sockaddr *)&server,(socklen_t *)sizeof(struct sockaddr));
 		if(ret < 0) {
 			perror("Rcv error\n");
 			return -1;
@@ -80,7 +87,7 @@ int ack_wait(int sfd, char* file)
 
 	if(data_buf[0] == 0 && data_buf[1] == 5)
 	{
-		error_msg(data_buf[3]);
+		//error_msg(data_buf[3]);
 		return -1;
 	}
 
@@ -106,7 +113,7 @@ int send_data(int socket_fd, char* buf, uint16_t block_num, int data_size)
 	memcpy(data_buf + 2, &block_num, sizeof(block_num));
 	memcpy(data_buf + 4, buf, data_size);
 
-	status = sendto(socket_fd, data_buf, data_size + 4, 0, &server, sizeof(struct sockaddr));
+	status = sendto(socket_fd, data_buf, data_size + 4, 0, (struct sockaddr *)&server, sizeof(struct sockaddr));
 	if(status < 0)
 	{
 		perror("sendto");
@@ -280,6 +287,13 @@ int parse_args(int argc, char** argv)
 				//printf("ip address string\n");
 				if(validate_ip_address(optarg) < 0)
 					return -1;
+
+				if (!(host_info = gethostbyname (optarg)))
+				{   
+					perror ("Client could not get host address information");
+					exit (2);
+				}
+
 				break;
 			case 'r':
 				//printf("read request\n");
@@ -311,7 +325,7 @@ int main(int argc, char** argv)
 	parse_args(argc, argv);
 
 	/* create socket and bind with server */
-	socketfd = createSocket (&server);;
+	socketfd = createSocket ();
 
 	run_tftp(socketfd);
 

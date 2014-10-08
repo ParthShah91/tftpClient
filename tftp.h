@@ -15,6 +15,11 @@
 #define READ		1
 #define WRITE		2
 #define RTCOUNT		5
+#define S_PORT		69
+
+
+struct sockaddr_in server;
+struct hostent *host_info;
 
 typedef enum _PACKET_TYPE_ { 
 	RD_REQ, 
