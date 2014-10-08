@@ -29,18 +29,24 @@
 
 #define MAX_DATA_SIZE		300
 #define MAX_FILE_NAME_LEN	255
-#define IP_ADDRESS_LEN		4
 #define TIMEOUT			5   /* time out in seconds */
 bool is_read_request = false, is_write_request = false;
 char read_file_name[MAX_FILE_NAME_LEN], write_file_name[MAX_FILE_NAME_LEN];
-unsigned char server_ip_address[IP_ADDRESS_LEN];
 
 char data_buf[MAX_DATA_SIZE];
 
 int rw_req_packet(unsigned char req_type, char *filename, encoding_type type)
 {
-
+	int len;
+	len = sprintf (buf, "%c%c%s%c%s%c", 0x00, req_type, filename, 0x00, type, 0x00);
+	if (len == 0)
+	{   
+		printf ("Error in creating the request packet\n");
+		return -1; 
+	}   
+	return len;
 }
+
 struct rw_hdr* read_write(int opcode, char* filename, int mode)
 {
 
@@ -113,10 +119,11 @@ int send_data(int socket_fd, char* buf, uint16_t block_num, int data_size)
 	memcpy(data_buf + 2, &block_num, sizeof(block_num));
 	memcpy(data_buf + 4, buf, data_size);
 
-	status = sendto(socket_fd, data_buf, data_size + 4, 0, (struct sockaddr *)&server, sizeof(struct sockaddr));
+	printf("socket_fd: %d\n", socket_fd);
+	status = sendto(socket_fd, data_buf, data_size + 4, 0, NULL, 0);
 	if(status < 0)
 	{
-		perror("sendto");
+		perror("<sendData> sendto");
 		return -1;
 	}
 
@@ -131,6 +138,7 @@ int tftp_send(char* file, int socketFd)
 	bool file_read_complete = false;
 	FILE* fp;
 
+	printf("tftp_send\n");
 	/* Open file which is requested to send */
 	fp = fopen(file,"r");
 	if(!fp) {
@@ -143,6 +151,7 @@ int tftp_send(char* file, int socketFd)
 	/* If time occurs and ack is not there then retransmit write request */
 	/* Get tid from ack if first run then store it otherwise compare */
 	rw_req_packet(WRITE, file, NET_ASCII);
+#if 0
 	while(i++ < RTCOUNT)
 	{
 		ret = ack_wait(socketFd, file);
@@ -157,6 +166,7 @@ int tftp_send(char* file, int socketFd)
 			break;
 
 	}
+#endif
 
 	/* Read data from file and create data packet with block number. send data packet */
 	/* Start timer and wait for ack until timeout. no ack then retransmit packet */
@@ -261,10 +271,10 @@ int validate_ip_address(char *ip_addr_str)
 			printf("ERROR: Invalid ip address string. Exiting...\n");
 			return -1;
 		}
-		server_ip_address[ip_address_byte++] = atoi(token);
 		//printf("ip byte: %d\n", server_ip_address[ip_address_byte - 1]);
 		token = strtok(NULL, ip_address_delim);
 	}
+	memcpy(server_ip_address, ip_addr_str, IP_ADDRESS_LEN);
 	return 0;
 }
 
@@ -276,15 +286,17 @@ int parse_args(int argc, char** argv)
 		{"put", required_argument, 0, 'r'},
 		{"get", required_argument, 0, 'w'},
 	};
+	printf("parse_args\n");
 	while(1)
 	{
 		c = getopt_long(argc, argv, "i:r:w:", opts, &opt_index);
 		if(c == -1)
 			break;
+		printf("c: %c\n", c);
 		switch(c)
 		{
 			case 'i':
-				//printf("ip address string\n");
+				printf("ip address string\n");
 				if(validate_ip_address(optarg) < 0)
 					return -1;
 
@@ -293,19 +305,19 @@ int parse_args(int argc, char** argv)
 					perror ("Client could not get host address information");
 					exit (2);
 				}
-
+				printf("All good for ip address string\n");
 				break;
 			case 'r':
-				//printf("read request\n");
+				printf("read request\n");
 				is_read_request = true;
 				strcpy(read_file_name, optarg);
-				//printf("file name: %s\n", read_file_name);
+				printf("file name: %s\n", read_file_name);
 				break;
 			case 'w':
-				//printf("write request\n");
+				printf("write request\n");
 				is_write_request = true;
 				strcpy(write_file_name, optarg);
-				//printf("file name: %s\n", write_file_name);
+				printf("file name: %s\n", write_file_name);
 				break;
 			case '?':
 				print_usage();
@@ -314,8 +326,8 @@ int parse_args(int argc, char** argv)
 				printf("ERROR: Invalid arguments. Exiting...\n");
 				break;
 		}
-		return 0;
 	}
+	return 0;
 }
 int main(int argc, char** argv)
 {
@@ -327,7 +339,16 @@ int main(int argc, char** argv)
 	/* create socket and bind with server */
 	socketfd = createSocket ();
 
-	run_tftp(socketfd);
+	//run_tftp(socketfd);
+	printf("is_write_request: %d\n", is_write_request);
+	if(is_write_request)
+	{
+		tftp_send(write_file_name, socketfd);
+	}
+	else
+	{
+		tftp_rcv();
+	}
 
 	return 0;
 }

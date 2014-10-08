@@ -16,10 +16,12 @@
 #define WRITE		2
 #define RTCOUNT		5
 #define S_PORT		69
+#define IP_ADDRESS_LEN		8
 
 
 struct sockaddr_in server;
 struct hostent *host_info;
+char server_ip_address[IP_ADDRESS_LEN];
 
 typedef enum _PACKET_TYPE_ { 
 	RD_REQ, 
