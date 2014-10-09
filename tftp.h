@@ -19,14 +19,14 @@
 #define IP_ADDRESS_LEN	16	
 
 #define DATA_SIZE	512
-#define RETRIES		3
 
 struct sockaddr_in server;
 struct hostent *host_info;
 char server_ip_address[IP_ADDRESS_LEN];
+int error_code;
 
 typedef enum _PACKET_TYPE_ { 
-	RD_REQ, 
+	RD_REQ=1, 
 	WR_REQ,
 	DATA,
 	ACK,
@@ -41,8 +41,21 @@ typedef enum _encoding_type_ {
 #endif
 
 int rw_req_packet(int socketFd, unsigned char req_type, char *filename, char* type);
-int ack_packet(uint16_t opcode, uint16_t block);
+int ack_packet(int socketFd, uint16_t block, char *ackbuf);
 int data_packet(uint16_t opcode, uint16_t block, char *data);
-int error_packet(uint16_t opcode, uint16_t error_code, char *errmsg);
+/* int error_packet(int socketFd, uint16_t error_code, char *errmsg, char *buf);*/
+int error_packet(int socketFd, uint16_t error_code, char *errmsg);
 
-char buf[BUFSIZ];
+char buf[DATA_SIZE];
+
+#if 0
+char err_msg [7][40] = {"Not defined, see error message if any",
+	"File not fount",
+	"Access Violation",
+	"Disk full, or allocation exceeded",
+	"Illegal TFTP operation",
+	"Unknown transfer ID",
+	"File already exists"};
+#endif
+
+
