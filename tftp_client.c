@@ -29,7 +29,7 @@
 
 #define MAX_DATA_SIZE		300
 #define MAX_FILE_NAME_LEN	255
-#define TIMEOUT			5   /* time out in seconds */
+#define TIMEOUT			500   /* time out in seconds */
 bool is_read_request = false, is_write_request = false;
 char read_file_name[MAX_FILE_NAME_LEN], write_file_name[MAX_FILE_NAME_LEN];
 
@@ -37,7 +37,7 @@ char data_buf[MAX_DATA_SIZE];
 
 int rw_req_packet(int socketFd, unsigned char req_type, char *filename, char *type)
 {
-	int len, status = 0;
+	int len;
 
 	len = sprintf (buf, "%c%c%s%c%s%c", 0x00, req_type, filename, 0x00, type, 0x00);
 	if (len == 0)
@@ -46,7 +46,7 @@ int rw_req_packet(int socketFd, unsigned char req_type, char *filename, char *ty
 		return -1;
 	}   
 	//TODO modularize
-	if(sendto(socketFd, buf, 4 + strlen(filename) + strlen(type), 0, (struct sockaddr *)&server, sizeof(server)) != len);
+	if(sendto(socketFd, buf, len, 0, (struct sockaddr *)&server, sizeof(server)) != len);
 	//TODO 512 should not be sent
 	{
 		perror("proper sending is not happen\n");
@@ -90,21 +90,6 @@ int error_packet(int socketFd, uint16_t error_code, char *errmsg)
 		return -1;
 	}
 	return 0;
-}
-
-struct rw_hdr* read_write(int opcode, char* filename, int mode)
-{
-
-}
-
-struct ack_hdr* ack(int block)
-{
-
-}
-
-struct data_hdr* data(int block, char* data)
-{
-
 }
 
 int ack_wait(int sfd, char* file)
@@ -291,6 +276,7 @@ int tftp_send(char* file, int socketFd)
 		printf("\n\n");
 		//file_read_complete = true; //TODO update this condition
 	}
+	return 0;
 }
 
 int tftp_rcv(char* file, int socketFd)
@@ -308,17 +294,16 @@ int tftp_rcv(char* file, int socketFd)
 	 * if data packet is less then 512 then it means it is last packet */
 
 	/* local variables */
-	int len, server_len, opcode, i, j, n, tid = 0, flag = 1;
+	int server_len, opcode, tid = 0;
+	int i, j, n;
 	unsigned short int count = 0, rcount = 0;
 	unsigned char filebuf[DATA_SIZE + 1];
 	unsigned char packetbuf[DATA_SIZE + 12];
 	extern int errno;
-	char filename[128], mode[12], *bufindex, ackbuf[512];
+	char filename[128], mode[12];
+	char *bufptr;
 	struct sockaddr_in data;
 	FILE *fp;			/* pointer to the file we will be getting */
-
-//	strcpy (filename, pFilename);	//copy the pointer to the filename into a real array
-//	strcpy (mode, pMode);		//same as above
 
 	strcpy (mode, "netascii");
 	fp = fopen (read_file_name, "w");	/* open the file for writing */
@@ -326,21 +311,20 @@ int tftp_rcv(char* file, int socketFd)
 	{				//if the pointer is null then the file can't be opened - Bad perms 
 		printf ("Client requested bad file: cannot open for writing (%s)\n",
 					filename);
-		return;
+		return -1;
 	}
 	
 	printf ("Getting file... (destination: %s) \n", filename);
 	rw_req_packet(socketFd, READ, read_file_name, "netascii");
-	/* zero the buffer before we begin */
+	
 	memset (filebuf, 0, sizeof (filebuf));
 	n = DATA_SIZE + 4;
 	
 	do
 	{
-		/* zero buffers so if there are any errors only NULLs will be exposed */
 		memset (packetbuf, 0, sizeof (packetbuf));
-		memset (ackbuf, 0, sizeof (ackbuf));
-		if (n != (DATA_SIZE + 4))	/* remember if our DATA_SIZE is less than a full packet this was the last packet to be received */
+		
+		if (n != (DATA_SIZE + 4))
 		{
 			printf("Last chunk detected (file chunk size: %d). exiting while loop\n",n - 4);
 			printf("Last packet recieved");
@@ -359,7 +343,6 @@ int tftp_rcv(char* file, int socketFd)
 			n = -1;
 			for (i = 0; errno == EAGAIN && i <= TIMEOUT && n < 0; i++)
 			{
-
 				n = recvfrom (socketFd, packetbuf, sizeof (packetbuf) - 1,
 							MSG_DONTWAIT, (struct sockaddr *) &data,
 							(socklen_t *) & server_len);
@@ -374,38 +357,20 @@ int tftp_rcv(char* file, int socketFd)
 
 			if (n < 0 && errno == EAGAIN)	/* If timeout occurs */
 			{
-				printf("The server could not receive from the client (errno: %d n: %d)\n",errno, n);
-				printf ("Timeout waiting for data (errno: %d == %d n: %d)\n",
-							errno, EAGAIN, n);
+				printf("Client packet got lost");
+				printf ("Timeout waiting for data");
 			}
 			else
 			{
-				if (server.sin_addr.s_addr != data.sin_addr.s_addr)	/* checks to ensure get from ip is same from ACK IP */
-				{
-					printf("Error recieving file (data from invalid address)\n");
-					j--;
-					continue;	/* we aren't going to let another connection spoil our first connection */
-				}
-				if (tid != ntohs (server.sin_port))	/* checks to ensure get from the correct TID */
-				{
-					printf ("Error recieving file (data from invalid tid)\n");
-					len = sprintf ((char *) packetbuf, "%c%c%c%cBad/Unknown TID%c", 0x00, 0x05, 0x00, 0x05, 0x00);
-					if (sendto (socketFd, packetbuf, len, 0, (struct sockaddr *) &server, sizeof (server)) != len)
-					{
-						printf("Mismatch in number of sent bytes while trying to send mode error packet\n");
-					}
-					j--;
-					continue;	/* we aren't going to let another connection spoil our first connection */
-				}
-				/* this formatting code is just like the code in the main function */
-				bufindex = (char *) packetbuf;	/*start our pointer going*/
-				if (bufindex++[0] != 0x00)
+				
+				bufptr = (char *) packetbuf;	/*start our pointer going*/
+				if (bufptr++[0] != 0x00)
 					printf ("bad first nullbyte!\n");
-				opcode = *bufindex++;
-				rcount = *bufindex++ << 8;
+				opcode = *bufptr++;
+				rcount = *bufptr++ << 8;
 				rcount &= 0xff00;
-				rcount += (*bufindex++ & 0x00ff);
-				memcpy ((char *) filebuf, bufindex, n - 4);
+				rcount += (*bufptr++ & 0x00ff);
+				memcpy ((char *) filebuf, bufptr, n - 4);
 				if (opcode != 3)
 				{
 					printf("Badly ordered/invalid data packet (Got OP: %d Block: %d) (Wanted Op: 3 Block: %d)\n",
@@ -418,31 +383,7 @@ int tftp_rcv(char* file, int socketFd)
 				}
 				else
 				{
-
-					len = ack_packet(socketFd, count, buf);
-					printf ("Sending ack # %04d (length: %d)\n", count, len);
-					//if (((count - 1) % ackfreq) == 0)
-					if (count -1 == 0)
-					{
-						if (sendto(socketFd, buf, len, 0, (struct sockaddr *) &server,
-								 sizeof (server)) != len)
-						{
-							printf ("Mismatch in number of sent bytes\n");
-							return;
-						}
-						printf ("The client has sent an ACK for packet %d\n",
-									count);
-					}		/*check for ackfreq*/
-					else if (count == 1)
-					{
-						if (sendto(socketFd, buf, len, 0, (struct sockaddr *) &server,
-								 sizeof (server)) != len)
-						{
-							printf ("Mismatch in number of sent bytes\n");
-							return;
-						}
-						printf ("The Client has sent an ACK for packet 1\n");
-					}
+					ack_packet(socketFd, count, buf);
 					break;
 				}		//end of else
 			}
@@ -451,7 +392,7 @@ int tftp_rcv(char* file, int socketFd)
 		{
 			printf ("Data recieve Timeout. Aborting transfer\n");
 			fclose (fp);
-			return;
+			return -1;
 		}
 	}
 	while (fwrite (filebuf, 1, n - 4, fp) == n - 4);
@@ -461,7 +402,7 @@ done:
 	fclose (fp);
 	sync ();
 	printf ("fclose and sync successful. File received successfully\n");
-	return;
+	return 0;
 
 }
 
@@ -481,6 +422,7 @@ int creat_socket(char* addr, int port)
 	/* create socket */
 	/* bind with server port*/
 	/* on success return socket fd */
+	return 0;
 }
 
 int valid_ip_address(char* addr)
@@ -488,6 +430,7 @@ int valid_ip_address(char* addr)
 	/* proper ip addr is there or not */
 	/* its in same subnet in which we are */
 	/* return -ev if something goes wrong otherwise 0 */
+	return 0;
 }
 
 void print_usage(void)
@@ -509,7 +452,6 @@ int validate_ip_address(char *ip_addr_str)
 {
 	char ip_address_delim[2] = ".";
 	char *token;
-	int ip_address_byte = 0;
 
 	memcpy(server_ip_address, ip_addr_str, IP_ADDRESS_LEN);
 	token = strtok(ip_addr_str, ip_address_delim);
@@ -518,7 +460,7 @@ int validate_ip_address(char *ip_addr_str)
 		if(atoi(token) > 255)
 		{
 			printf("ERROR: Invalid ip address string. Exiting...\n");
-			memcpy(server_ip_address, 0, IP_ADDRESS_LEN);
+			memset(server_ip_address, 0, IP_ADDRESS_LEN);
 			return -1;
 		}
 		//printf("ip byte: %d\n", server_ip_address[ip_address_byte - 1]);
@@ -580,7 +522,6 @@ int parse_args(int argc, char** argv)
 }
 int main(int argc, char** argv)
 {
-	struct sockaddr_in server;
 	int socketfd;
 	/* argument check */
 	parse_args(argc, argv);

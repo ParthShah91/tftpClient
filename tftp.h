@@ -45,6 +45,8 @@ int ack_packet(int socketFd, uint16_t block, char *ackbuf);
 int data_packet(uint16_t opcode, uint16_t block, char *data);
 /* int error_packet(int socketFd, uint16_t error_code, char *errmsg, char *buf);*/
 int error_packet(int socketFd, uint16_t error_code, char *errmsg);
+int createSocket();
+
 
 char buf[DATA_SIZE];
 
