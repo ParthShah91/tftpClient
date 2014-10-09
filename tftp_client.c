@@ -112,68 +112,91 @@ int ack_wait(int sfd, char* file)
 	fd_set rfds;
 	int retval;
 	struct timeval timeout;
-	int i;
-	int ret;
+	int i, ret, server_len, n, tid;
+	struct sockaddr_in data;
 
-	FD_ZERO(&rfds);
-	FD_SET(sfd, &rfds);
-	timeout.tv_sec = TIMEOUT;
-	timeout.tv_usec = 0;
-
-	retval = select(1, &rfds, NULL, NULL, &timeout);
-	if (retval == -1)
-		return -1;
-	else if (retval) {
-		printf("Data is available now.\n");
-		ret = recvfrom(sfd, data_buf, sizeof(data_buf), 0, (struct sockaddr *)&server,(socklen_t *)sizeof(struct sockaddr));
-		if(ret < 0) {
-			perror("Rcv error\n");
-			return -1;
-		}
-	}
-	else {
-		printf("No data within five seconds.\n");
-		return -2;
+	printf("Inside ack_wait\n");
+	server_len = sizeof(data);
+	errno = EAGAIN;
+	n = -1;
+	for (i = 0; errno == EAGAIN && i <= 1000 && n < 0; i++)
+	{
+		n = recvfrom (sfd, data_buf, 4,
+				MSG_DONTWAIT, (struct sockaddr *) &data,
+				(socklen_t *) & server_len);
+		//printf("n: %d\n", n);
+		usleep(1000);
 	}
 
-	if(data_buf[0] == 0 && data_buf[1] == 5)
+	if (!tid)
+	{
+		tid = ntohs (data.sin_port);
+		server.sin_port = htons (tid);
+	}
+
+	printf("data_buf[0]: %d\n", data_buf[0]);
+	printf("data_buf[1]: %d\n", data_buf[1]);
+	printf("data_buf[2]: %d\n", data_buf[2]);
+	printf("data_buf[3]: %d\n", data_buf[3]);
+	if(data_buf[0] == 0 && data_buf[1] == 4)
 	{
 		//error_msg(data_buf[3]);
-		return -1;
+		return 0;
 	}
 
-	return 0;
+	return -1;
 
 	/* Todo */
 }
 
 int send_data(int socket_fd, char* buf, uint16_t block_num, int data_size)
 {
-	char *data_buf = NULL;
+	//char *data_buf = NULL;
+	char data_buf[550];
 	int status = 0, len = 0;
 
-	data_buf = (char*)malloc(data_size + 4); //TODO remove hardcoding
+	/*data_buf = (char*)malloc(data_size + 4); //TODO remove hardcoding
 	if(!data_buf)
 	{
 		perror("send_data malloc");
 		return -1;
 	}
+	
+	memset(data_buf, 0 , data_size + 4);
+	*/
+	memset(data_buf, 0 , 550);
+	
+	//data_buf[0] = 0;
+	//data_buf[1] = 3; // TODO remove hardcoding
+	//memcpy(data_buf + 2, &block_num, sizeof(block_num));
+	len = sprintf (data_buf, "%c%c%c%c%s", 0x00, 0x03, 0x00, 0x00, buf);
+        if (len == 0)
+        {
+                printf ("Error in creating the ACK packet\n");    /*could not print to the client buffer */
+                return -1;
+        }
+	data_buf[2] = (block_num & 0xFF00) >> 8;
+	data_buf[3] = (block_num & 0x00FF);
 
-	data_buf[0] = 0;
-	data_buf[1] = 3; // TODO remove hardcoding
-	memcpy(data_buf + 2, &block_num, sizeof(block_num));
-	memcpy(data_buf + 4, buf, data_size);
+	//memcpy(data_buf + 4, buf, data_size);
 
 	printf("socket_fd: %d\n", socket_fd);
 	printf("data_size: %d\n", data_size);
 	len = sizeof(server);
 	status = sendto(socket_fd, data_buf, data_size + 4, 0, (struct sockaddr*)&server, len);
+	//data_buf = NULL;
 	if(status < 0)
 	{
 		perror("<sendData> sendto");
+		//free(data_buf);
 		return -1;
 	}
+	else if( status < 512)
+	{
+		return 1;
+	}
 
+	//free(data_buf);
 	return 0;
 }
 
@@ -181,7 +204,7 @@ int tftp_send(char* file, int socketFd)
 {
 	char buf[512]; //TODO remove hardcoding
 	uint16_t block_num = 0;
-	int i = 0, ret = 0, num_bytes_read = 0;
+	int i = 0, ret = 0, num_bytes_read = 0, status;
 	bool file_read_complete = false;
 	FILE* fp;
 
@@ -227,24 +250,46 @@ int tftp_send(char* file, int socketFd)
 				return -1;
 			}
 		}
-		send_data(socketFd, buf, block_num, num_bytes_read);
+		printf("++ blockNum: %d\n", block_num);
+		status = send_data(socketFd, buf, block_num, num_bytes_read);
+		if(status < 0)
+		{
+			fclose(fp);
+			break;	
+		}
+		else if (status > 0)
+		{
+			//TODO ack_wait(socketFd, file);
+			ret = ack_wait(socketFd, file);
+			fclose(fp);
+			printf("sent successfully");
+			break;	
+			
+		}
+		i = 0;
 		while(i++ < RTCOUNT)
 		{
 			ret = ack_wait(socketFd, file);
-			if (ret == -2)
+			if (ret == -1)
 			{
+				printf("Sending data again for block_num %d..\n", block_num);
 				send_data(socketFd, buf, block_num, num_bytes_read);
 			}
-			else if(ret == -1)
+			/*else if(ret == -1) //TODO
 			{
 				fclose(fp);
 				return -1;
-			}
+			}*/
 			else
+			{
+				//fclose(fp);
 				break;
+			}
 
 		}
-
+		block_num++;
+		printf("\n\n");
+		//file_read_complete = true; //TODO update this condition
 	}
 }
 
