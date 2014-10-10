@@ -34,6 +34,7 @@ bool is_read_request = false, is_write_request = false;
 char read_file_name[MAX_FILE_NAME_LEN], write_file_name[MAX_FILE_NAME_LEN];
 
 char data_buf[MAX_DATA_SIZE];
+int tid;
 
 int rw_req_packet(int socketFd, unsigned char req_type, char *filename, char *type)
 {
@@ -97,10 +98,10 @@ int ack_wait(int sfd, char* file)
 	fd_set rfds;
 	int retval;
 	struct timeval timeout;
-	int i, ret, server_len, n, tid;
+	int i,  server_len = 0, n;
 	struct sockaddr_in data;
 
-	printf("Inside ack_wait\n");
+	//printf("Inside ack_wait\n");
 	server_len = sizeof(data);
 	errno = EAGAIN;
 	n = -1;
@@ -117,12 +118,17 @@ int ack_wait(int sfd, char* file)
 	{
 		tid = ntohs (data.sin_port);
 		server.sin_port = htons (tid);
+		printf("tid = %d\n",tid);
 	}
 
-	printf("data_buf[0]: %d\n", data_buf[0]);
-	printf("data_buf[1]: %d\n", data_buf[1]);
-	printf("data_buf[2]: %d\n", data_buf[2]);
-	printf("data_buf[3]: %d\n", data_buf[3]);
+	if(tid != ntohs (data.sin_port))
+	{
+		printf("Server TID get changed\n");
+	}
+	//printf("data_buf[0]: %d\n", data_buf[0]);
+	//printf("data_buf[1]: %d\n", data_buf[1]);
+	//printf("data_buf[2]: %d\n", data_buf[2]);
+	//printf("data_buf[3]: %d\n", data_buf[3]);
 	if(data_buf[0] == 0 && data_buf[1] == 4)
 	{
 		//error_msg(data_buf[3]);
@@ -136,11 +142,11 @@ int ack_wait(int sfd, char* file)
 
 int send_data(int socket_fd, char* buf, uint16_t block_num, int data_size)
 {
-	//char *data_buf = NULL;
-	char data_buf[550];
+	char *data_buf = NULL;
+	//char data_buf[550];
 	int status = 0, len = 0;
-
-	/*data_buf = (char*)malloc(data_size + 4); //TODO remove hardcoding
+#if 1
+	data_buf = (char* ) malloc(data_size + 4); //TODO remove hardcoding
 	if(!data_buf)
 	{
 		perror("send_data malloc");
@@ -148,40 +154,43 @@ int send_data(int socket_fd, char* buf, uint16_t block_num, int data_size)
 	}
 	
 	memset(data_buf, 0 , data_size + 4);
-	*/
-	memset(data_buf, 0 , 550);
+#endif
+	//memset(data_buf, 0 , 550);
 	
-	//data_buf[0] = 0;
-	//data_buf[1] = 3; // TODO remove hardcoding
-	//memcpy(data_buf + 2, &block_num, sizeof(block_num));
-	len = sprintf (data_buf, "%c%c%c%c%s", 0x00, 0x03, 0x00, 0x00, buf);
+	len = sprintf (data_buf, "%c%c%c%c", 0x00, 0x03, 0x00, 0x00);
+	memcpy((char *)data_buf + 4, buf, data_size);
+
         if (len == 0)
         {
                 printf ("Error in creating the ACK packet\n");    /*could not print to the client buffer */
                 return -1;
         }
-	data_buf[2] = (block_num & 0xFF00) >> 8;
-	data_buf[3] = (block_num & 0x00FF);
+	data_buf[2] = (unsigned char ) (block_num & 0xFF00) >> 8;
+	data_buf[3] = (unsigned char ) (block_num & 0x00FF);
 
 	//memcpy(data_buf + 4, buf, data_size);
 
-	printf("socket_fd: %d\n", socket_fd);
-	printf("data_size: %d\n", data_size);
-	len = sizeof(server);
-	status = sendto(socket_fd, data_buf, data_size + 4, 0, (struct sockaddr*)&server, len);
+	//printf("socket_fd: %d\n", socket_fd);
+	//printf("data_size: %d\n", data_size);
+	//len = sizeof(server);
+	status = sendto(socket_fd, data_buf, data_size + 4, 0, (struct sockaddr*)&server, sizeof(server));
 	//data_buf = NULL;
 	if(status < 0)
 	{
+		free(data_buf);
 		perror("<sendData> sendto");
 		//free(data_buf);
 		return -1;
 	}
 	else if( status < 512)
 	{
+		printf("Less data\n");
+		free(data_buf);
 		return 1;
 	}
 
-	//free(data_buf);
+	//printf("normal return\n");
+	free(data_buf);
 	return 0;
 }
 
@@ -206,6 +215,7 @@ int tftp_send(char* file, int socketFd)
 	/* If time occurs and ack is not there then retransmit write request */
 	/* Get tid from ack if first run then store it otherwise compare */
 	rw_req_packet(socketFd, WRITE, file, "netascii");
+	i = 0;
 	while(i++ < RTCOUNT)
 	{
 		ret = ack_wait(socketFd, file);
@@ -235,7 +245,7 @@ int tftp_send(char* file, int socketFd)
 				return -1;
 			}
 		}
-		printf("++ blockNum: %d\n", block_num);
+		//printf("++ blockNum: %d\n", block_num);
 		status = send_data(socketFd, buf, block_num, num_bytes_read);
 		if(status < 0)
 		{
@@ -273,7 +283,7 @@ int tftp_send(char* file, int socketFd)
 
 		}
 		block_num++;
-		printf("\n\n");
+		//printf("\n\n");
 		//file_read_complete = true; //TODO update this condition
 	}
 	return 0;
@@ -306,16 +316,16 @@ int tftp_rcv(char* file, int socketFd)
 	FILE *fp;			/* pointer to the file we will be getting */
 
 	strcpy (mode, "netascii");
-	fp = fopen (read_file_name, "w");	/* open the file for writing */
+	fp = fopen (file, "w");	/* open the file for writing */
 	if (fp == NULL)
 	{				//if the pointer is null then the file can't be opened - Bad perms 
 		printf ("Client requested bad file: cannot open for writing (%s)\n",
-					filename);
+					file);
 		return -1;
 	}
 	
-	printf ("Getting file... (destination: %s) \n", filename);
-	rw_req_packet(socketFd, READ, read_file_name, "netascii");
+	printf ("Getting file... (destination: %s) \n", file);
+	rw_req_packet(socketFd, READ, file, "netascii");
 	
 	memset (filebuf, 0, sizeof (filebuf));
 	n = DATA_SIZE + 4;
@@ -491,11 +501,11 @@ int parse_args(int argc, char** argv)
 				if(validate_ip_address(optarg) < 0)
 					return -1;
 
-				if (!(host_info = gethostbyname (optarg)))
-				{   
-					perror ("Client could not get host address information");
-					exit (2);
-				}
+				//if (!(host_info = gethostbyname (optarg)))
+				//{   
+				//perror ("Client could not get host address information");
+				//exit (2);
+				//}
 				printf("All good for ip address string\n");
 				break;
 			case 'r':

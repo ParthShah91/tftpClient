@@ -21,7 +21,7 @@
 #define DATA_SIZE	512
 
 struct sockaddr_in server;
-struct hostent *host_info;
+/* struct hostent *host_info;*/
 char server_ip_address[IP_ADDRESS_LEN];
 int error_code;
 
